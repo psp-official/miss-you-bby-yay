@@ -789,7 +789,7 @@ async def place_auto_bet(user_tg_id, current_issue, bet_type, total_amount=10, s
         headers = get_headers(site, token)
         signed_payload = get_signed_payload(payload)
         
-        async with _DeprecatedSessionGuard() as http:
+        async with aiohttp.ClientSession() as http:
             async with http.post(url, headers=headers, json=signed_payload) as resp:
                 res = await resp.json()
                 
@@ -959,9 +959,7 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
     total_bets = 0
     total_wins = 0
     total_losses = 0
-    session_started_balance = float(session.get("virtual_balance", 0.0) if is_virtual else session.get("start_balance", 0.0))
-    total_wagered = 0.0
-
+    
     if not is_virtual:
         site_config = SITE_CONFIGS.get(session['site'])
         bal_url = f"{site_config['api_url']}/GetBalance"
@@ -1032,21 +1030,16 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
                     await asyncio.sleep(2)
                     continue 
 
-                seq = session.get("bet_sequence", [10, 20, 40, 80, 160, 320])
+                seq = session.get("bet_sequence", [10])
                 step = session.get("current_bet_step", 0)
                 if step >= len(seq):
                     step = 0
-                amt = validate_bet_amount(seq[step])
-                if total_bets >= MAX_BETS_PER_SESSION:
-                    await message.answer(f"🛑 Session bet limit reached ({MAX_BETS_PER_SESSION}).")
-                    active_sessions[user_tg_id]["is_auto_betting"] = False
-                    break
-                total_wagered += amt
+                amt = seq[step]
 
                 if is_virtual:
                     c_bal = session.get("virtual_balance", 0.0)
                 else:
-                    async with _DeprecatedSessionGuard() as http:
+                    async with aiohttp.ClientSession() as http:
                         payload = get_signed_payload({'language': 7})
                         async with http.post(bal_url, headers=bal_headers, json=payload) as resp:
                             bal_data = (await resp.json()).get("data", {})
@@ -1061,10 +1054,9 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
                 active_sessions[user_tg_id]["last_prediction_value"] = pred
                 bet_txt = (
                     f"<blockquote>\n"
-                    f"𝗚𝗼𝗼𝗱𝗟𝘂𝗰𝗸 𝗕𝗶𝗴𝘄𝗶𝗻𝟳𝟳𝟳 - 1.0:\n"
                     f"☉ {gn} : <code>{issue}</code>\n"
                     f"☉ {ai_name}\n"
-                    f"☉ Pred: <b>{pred.upper()}</b> | {amt:g} Ks\n"
+                    f"☉ Pred: <b>{pred.upper()}</b> | {amt} Ks\n"
                     f"</blockquote>"
                 )
                 await message.answer(bet_txt)
@@ -1100,7 +1092,7 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
                     try:
                         actual_str = res.split(" | ")[1].strip().lower()
                         if pred.lower() == actual_str:
-                            session["virtual_balance"] += amt * PAYOUT_MULTIPLIER
+                            session["virtual_balance"] += amt * 0.96
                         else:
                             session["virtual_balance"] -= amt
                         n_bal = session["virtual_balance"]
@@ -1108,7 +1100,7 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
                     except Exception:
                         pass
                 else:
-                    async with _DeprecatedSessionGuard() as http:
+                    async with aiohttp.ClientSession() as http:
                         payload = get_signed_payload({'language': 7})
                         async with http.post(bal_url, headers=bal_headers, json=payload) as resp:
                             bal_data = (await resp.json()).get("data", {})
@@ -1122,7 +1114,7 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
                     total_bets += 1
                     
                     if pred.lower() == actual:
-                        prof = amt * PAYOUT_MULTIPLIER
+                        prof = amt * 0.96
                         stat = f"☉ <b>WIN</b> ✔ +{prof} Ks"
                         
                         if is_virtual:
@@ -1170,13 +1162,9 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
                         c_prof = active_sessions[user_tg_id].get("session_profit", 0.0)
                     
                     win_rate = (total_wins / total_bets) * 100 if total_bets > 0 else 0.0
-                    if c_prof <= -MAX_LOSS:
-                        await message.answer(f"🛑 Maximum session loss reached: {MAX_LOSS:,.2f} Ks. Auto-Bet stopped.")
-                        active_sessions[user_tg_id]["is_auto_betting"] = False
                     
                     result_txt = (
                         f"<blockquote>\n"
-                        f"𝗚𝗼𝗼𝗱𝗟𝘂𝗰𝗸 𝗕𝗶𝗴𝘄𝗶𝗻𝟳𝟳𝟳 - 1.0:\n"
                         f"{stat}\n"
                         f"───────────────\n"
                         f"☉ {gn} : <code>{issue}</code>\n"
@@ -1189,9 +1177,7 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
                     await message.answer(result_txt)
                     
                     if not is_virtual:
-                        session["balance"] = f"{n_bal:.2f} Ks"
-                        session["start_balance"] = n_bal
-                        await db.update_user_balance(user_tg_id, session["balance"])
+                        await db.update_user_balance(user_tg_id, f"{n_bal:.2f} Ks")
                         
                     profit_target = session.get("profit_target", 0)
                     if profit_target > 0 and c_prof >= profit_target:
@@ -1211,6 +1197,7 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
 # ==========================================================
 # 🎯 Feature Handlers
 # ==========================================================
+
 @dp.message(F.text == TEXT_UPLOAD_CHANNEL)
 async def cmd_upload_channel_menu(msg: types.Message):
     if msg.from_user.id not in active_sessions:
