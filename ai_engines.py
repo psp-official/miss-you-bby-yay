@@ -4,15 +4,17 @@ import time
 import random
 import math
 from collections import defaultdict
-import google.generativeai as genai
 import os
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
-# Load env and configure Gemini API
+# Load env
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
-if api_key:
-    genai.configure(api_key=api_key)
+
+
+
     
 
 # ==========================================================
@@ -1013,33 +1015,44 @@ def gemini_ai_predict(history_docs):
         return "BIG", f"{P_AI_PRO} Gemini Pro (အကြီး) 🔴", 55.0, f"{P_AI_HOURGLASS} Gemini: Data စုဆောင်းဆဲ..."
     
     docs = list(reversed(history_docs))
-    # နောက်ဆုံးထွက်ခဲ့တဲ့ ပွဲ ၂၀ ရဲ့ ရလဒ်တွေကို ယူပါမယ်
+    # နောက်ဆုံး ၂၀ ပွဲ ယူပါမည်
     all_history = [d.get('size', 'BIG') for d in docs][-20:] 
     history_text = ", ".join(all_history)
     
     try:
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        # SDK အသစ်ဖြင့် Client တည်ဆောက်ခြင်း
+        client = genai.Client(api_key=api_key)
+        
         prompt = f"""
         အောက်ပါတို့သည် ကစားပွဲတစ်ခုမှ ယခင်ထွက်ရှိခဲ့သော 'BIG' နှင့် 'SMALL' ရလဒ်များဖြစ်သည်-
         ရလဒ်များ: [{history_text}]
         ဤ Pattern ကို ခွဲခြမ်းစိတ်ဖြာပြီး နောက်ထပ်ထွက်လာမည့် ရလဒ်ကို ခန့်မှန်းပါ။
         အဖြေကို "BIG" သို့မဟုတ် "SMALL" ဟုသာ (အခြားစာသားမပါဘဲ) တိုက်ရိုက်ဖြေကြားပါ။
         """
-        response = model.generate_content(prompt)
+        
+        # Generation တောင်းဆိုခြင်း
+        response = client.models.generate_content(
+            model='gemini-2.5-flash', # Model ကို အသစ်ပြောင်းထားပါသည်
+            contents=prompt,
+        )
+        
         pred = response.text.strip().upper()
         
-        # AI အဖြေကို ဖမ်းယူခြင်း
+        # အဖြေကို သေချာစစ်ဆေးခြင်း
         if "BIG" in pred:
             final_pred = "BIG"
-        else:
+        elif "SMALL" in pred:
             final_pred = "SMALL"
+        else:
+             # BIG လည်းမဟုတ် SMALL လည်းမဟုတ်ပါက မူလအတိုင်း BIG သတ်မှတ်မည်
+             final_pred = "BIG"
             
         burmese, dot = _label(final_pred)
-        return final_pred, f"{P_AI_PRO} Gemini Pro {final_pred} ({burmese}) {dot}", 85.0, f"{P_AI_PRO} Gemini 1.5 Pro ၏ ခွဲခြမ်းစိတ်ဖြာချက်"
+        return final_pred, f"{P_AI_PRO} Gemini Pro {final_pred} ({burmese}) {dot}", 85.0, f"{P_AI_PRO} Gemini ၏ ခွဲခြမ်းစိတ်ဖြာချက်"
         
     except Exception as e:
-        # Error တက်ခဲ့ရင် Wait လုပ်ခိုင်းပါမယ်
-        return "wait", "⚠️ Gemini API Error", 50.0, f"Error: ယာယီချိတ်ဆက်၍မရပါ"
+        print(f"Gemini API Error: {e}")
+        return "wait", "⚠️ Gemini API Error", 50.0, f"Error: {e}"
         
 
 
