@@ -4,6 +4,16 @@ import time
 import random
 import math
 from collections import defaultdict
+import google.generativeai as genai
+import os
+from dotenv import load_dotenv
+
+# Load env and configure Gemini API
+load_dotenv()
+api_key = os.getenv("GEMINI_API_KEY")
+if api_key:
+    genai.configure(api_key=api_key)
+    
 
 # ==========================================================
 # 🌟 Premium Emojis for AI Messages
@@ -997,6 +1007,42 @@ def pro_dynamic_ensemble_predict(history_docs, model_accuracies=None):
         
     return pred, f"📚 Dynamic {pred} ({burmese}) {dot}", final_conf, f"📚 Dynamic Weight Score (B:{big_score:.1f} S:{small_score:.1f})"
 
+
+def gemini_ai_predict(history_docs):
+    if len(history_docs) < 10:
+        return "BIG", f"{P_AI_PRO} Gemini Pro (အကြီး) 🔴", 55.0, f"{P_AI_HOURGLASS} Gemini: Data စုဆောင်းဆဲ..."
+    
+    docs = list(reversed(history_docs))
+    # နောက်ဆုံးထွက်ခဲ့တဲ့ ပွဲ ၂၀ ရဲ့ ရလဒ်တွေကို ယူပါမယ်
+    all_history = [d.get('size', 'BIG') for d in docs][-20:] 
+    history_text = ", ".join(all_history)
+    
+    try:
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        prompt = f"""
+        အောက်ပါတို့သည် ကစားပွဲတစ်ခုမှ ယခင်ထွက်ရှိခဲ့သော 'BIG' နှင့် 'SMALL' ရလဒ်များဖြစ်သည်-
+        ရလဒ်များ: [{history_text}]
+        ဤ Pattern ကို ခွဲခြမ်းစိတ်ဖြာပြီး နောက်ထပ်ထွက်လာမည့် ရလဒ်ကို ခန့်မှန်းပါ။
+        အဖြေကို "BIG" သို့မဟုတ် "SMALL" ဟုသာ (အခြားစာသားမပါဘဲ) တိုက်ရိုက်ဖြေကြားပါ။
+        """
+        response = model.generate_content(prompt)
+        pred = response.text.strip().upper()
+        
+        # AI အဖြေကို ဖမ်းယူခြင်း
+        if "BIG" in pred:
+            final_pred = "BIG"
+        else:
+            final_pred = "SMALL"
+            
+        burmese, dot = _label(final_pred)
+        return final_pred, f"{P_AI_PRO} Gemini Pro {final_pred} ({burmese}) {dot}", 85.0, f"{P_AI_PRO} Gemini 1.5 Pro ၏ ခွဲခြမ်းစိတ်ဖြာချက်"
+        
+    except Exception as e:
+        # Error တက်ခဲ့ရင် Wait လုပ်ခိုင်းပါမယ်
+        return "wait", "⚠️ Gemini API Error", 50.0, f"Error: ယာယီချိတ်ဆက်၍မရပါ"
+        
+
+
 # ============================================================
 # 🔮 BABATHAPAI Deep Memory AI (9000+ Database Scan Simulation)
 # ============================================================
@@ -1333,6 +1379,7 @@ PRO_AI_MODE_NAMES = {
     "pro_dynamic": "📚 Pro Dynamic Ensemble",
     "babathapai": "🔮 ʙᴀʙᴀᴛʜᴀᴘᴧɪ",
     "pro_max": "👑 AI Pro Max",
+    "gemini_pro": "🤖 Gemini 1.5 Pro AI", 
 }
 AI_MODE_NAMES.update(PRO_AI_MODE_NAMES)
 AI_MODE_NAMES["best_ai_selector"] = "🏆 Best AI Selector"
@@ -1351,6 +1398,7 @@ PRO_AI_MODES = {
     "pro_dynamic": {"func": pro_dynamic_ensemble_predict, "name": PRO_AI_MODE_NAMES["pro_dynamic"], "desc": "Dynamic Accuracy Tracking"},
     "babathapai": {"func": babathapai_predict, "name": PRO_AI_MODE_NAMES["babathapai"], "desc": "Deep Historical Memory Simulation"},
     "pro_max": {"func": pro_max_predict, "name": PRO_AI_MODE_NAMES["pro_max"], "desc": "Ultimate Pro AI Aggregator"},
+    "gemini_pro": {"func": gemini_ai_predict, "name": PRO_AI_MODE_NAMES["gemini_pro"], "desc": "Google Gemini 1.5 Pro Prediction"},
 }
 AI_MODES.update(PRO_AI_MODES)
 AI_MODES["best_ai_selector"] = {"func": best_ai_selector_predict, "name": AI_MODE_NAMES["best_ai_selector"], "desc": "Leakage-safe adaptive walk-forward selector"}
