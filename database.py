@@ -97,13 +97,3 @@ async def delete_old_history(site, game_type, keep_count=9000):
     ids = await game_history_collection.find({"site": site, "game_type": game_type}, {"_id": 1}).sort("issue", -1).skip(keep_count).to_list(length=100000)
     if ids:
         await game_history_collection.delete_many({"_id": {"$in": [x["_id"] for x in ids]}})
-
-
-async def save_user_llm_key(user_id, provider, encrypted_key):
-    field = "gemini_api_key_enc" if provider == "gemini" else "openai_api_key_enc"
-    await users_collection.update_one({"_id": user_id}, {"$set": {field: encrypted_key}}, upsert=True)
-
-async def get_user_llm_key(user_id, provider):
-    field = "gemini_api_key_enc" if provider == "gemini" else "openai_api_key_enc"
-    user = await get_user(user_id)
-    return user.get(field) if user else None
