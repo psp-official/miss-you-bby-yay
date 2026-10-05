@@ -4,18 +4,6 @@ import time
 import random
 import math
 from collections import defaultdict
-import os
-from google import genai
-from google.genai import types
-from dotenv import load_dotenv
-
-# Load env
-load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
-
-
-
-    
 
 # ==========================================================
 # 🌟 Premium Emojis for AI Messages
@@ -77,7 +65,9 @@ AI_MODE_EMOJIS = {
     "Circle Rnd":        "5226711870492126219",
     "Custom Pattern":    "6300853298249336390",
     "AI Auto Swap":      "5868665489092263539",
-    "🏆 Best AI Selector": "5884289942371401145"
+    "🏆 Best AI Selector": "5884289942371401145",
+    "Gemini AI": "5877652234091891383",
+    "ChatGPT AI": "5877652234091891383"
 }
 
 # ==========================================================
@@ -1009,53 +999,6 @@ def pro_dynamic_ensemble_predict(history_docs, model_accuracies=None):
         
     return pred, f"📚 Dynamic {pred} ({burmese}) {dot}", final_conf, f"📚 Dynamic Weight Score (B:{big_score:.1f} S:{small_score:.1f})"
 
-
-def gemini_ai_predict(history_docs):
-    if len(history_docs) < 10:
-        return "BIG", f"{P_AI_PRO} Gemini Pro (အကြီး) 🔴", 55.0, f"{P_AI_HOURGLASS} Gemini: Data စုဆောင်းဆဲ..."
-    
-    docs = list(reversed(history_docs))
-    # နောက်ဆုံး ၂၀ ပွဲ ယူပါမည်
-    all_history = [d.get('size', 'BIG') for d in docs][-20:] 
-    history_text = ", ".join(all_history)
-    
-    try:
-        # SDK အသစ်ဖြင့် Client တည်ဆောက်ခြင်း
-        client = genai.Client(api_key=api_key)
-        
-        prompt = f"""
-        အောက်ပါတို့သည် ကစားပွဲတစ်ခုမှ ယခင်ထွက်ရှိခဲ့သော 'BIG' နှင့် 'SMALL' ရလဒ်များဖြစ်သည်-
-        ရလဒ်များ: [{history_text}]
-        ဤ Pattern ကို ခွဲခြမ်းစိတ်ဖြာပြီး နောက်ထပ်ထွက်လာမည့် ရလဒ်ကို ခန့်မှန်းပါ။
-        အဖြေကို "BIG" သို့မဟုတ် "SMALL" ဟုသာ (အခြားစာသားမပါဘဲ) တိုက်ရိုက်ဖြေကြားပါ။
-        """
-        
-        # Generation တောင်းဆိုခြင်း
-        response = client.models.generate_content(
-            model='gemini-2.5-flash', # Model ကို အသစ်ပြောင်းထားပါသည်
-            contents=prompt,
-        )
-        
-        pred = response.text.strip().upper()
-        
-        # အဖြေကို သေချာစစ်ဆေးခြင်း
-        if "BIG" in pred:
-            final_pred = "BIG"
-        elif "SMALL" in pred:
-            final_pred = "SMALL"
-        else:
-             # BIG လည်းမဟုတ် SMALL လည်းမဟုတ်ပါက မူလအတိုင်း BIG သတ်မှတ်မည်
-             final_pred = "BIG"
-            
-        burmese, dot = _label(final_pred)
-        return final_pred, f"{P_AI_PRO} Gemini Pro {final_pred} ({burmese}) {dot}", 85.0, f"{P_AI_PRO} Gemini ၏ ခွဲခြမ်းစိတ်ဖြာချက်"
-        
-    except Exception as e:
-        print(f"Gemini API Error: {e}")
-        return "wait", "⚠️ Gemini API Error", 50.0, f"Error: {e}"
-        
-
-
 # ============================================================
 # 🔮 BABATHAPAI Deep Memory AI (9000+ Database Scan Simulation)
 # ============================================================
@@ -1392,7 +1335,6 @@ PRO_AI_MODE_NAMES = {
     "pro_dynamic": "📚 Pro Dynamic Ensemble",
     "babathapai": "🔮 ʙᴀʙᴀᴛʜᴀᴘᴧɪ",
     "pro_max": "👑 AI Pro Max",
-    "gemini_pro": "🤖 Gemini 1.5 Pro AI", 
 }
 AI_MODE_NAMES.update(PRO_AI_MODE_NAMES)
 AI_MODE_NAMES["best_ai_selector"] = "🏆 Best AI Selector"
@@ -1411,10 +1353,11 @@ PRO_AI_MODES = {
     "pro_dynamic": {"func": pro_dynamic_ensemble_predict, "name": PRO_AI_MODE_NAMES["pro_dynamic"], "desc": "Dynamic Accuracy Tracking"},
     "babathapai": {"func": babathapai_predict, "name": PRO_AI_MODE_NAMES["babathapai"], "desc": "Deep Historical Memory Simulation"},
     "pro_max": {"func": pro_max_predict, "name": PRO_AI_MODE_NAMES["pro_max"], "desc": "Ultimate Pro AI Aggregator"},
-    "gemini_pro": {"func": gemini_ai_predict, "name": PRO_AI_MODE_NAMES["gemini_pro"], "desc": "Google Gemini 1.5 Pro Prediction"},
 }
 AI_MODES.update(PRO_AI_MODES)
 AI_MODES["best_ai_selector"] = {"func": best_ai_selector_predict, "name": AI_MODE_NAMES["best_ai_selector"], "desc": "Leakage-safe adaptive walk-forward selector"}
+AI_MODES["gemini_ai"] = {"func": pattern_predict, "name": "Gemini AI", "desc": "Google Gemini API statistical analysis"}
+AI_MODES["chatgpt_ai"] = {"func": pattern_predict, "name": "ChatGPT AI", "desc": "OpenAI API statistical analysis"}
 
 def get_prediction(history_docs, mode, user_pattern=None, model_accuracies=None):
     if mode == "custom_pattern":
