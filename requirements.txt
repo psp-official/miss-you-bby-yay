@@ -3,4 +3,5 @@ aiohttp>=3.9,<4
 motor>=3.3,<4
 python-dotenv>=1.0,<2
 numpy>=1.26,<3
-google-genai
+
+cryptography>=43,<47
