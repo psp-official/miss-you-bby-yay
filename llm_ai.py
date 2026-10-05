@@ -1,6 +1,4 @@
-#"""LLM prediction adapters for Gemini and OpenAI.
-#API keys are passed in at runtime; this module never logs them.
-#"""
+
 import os
 import json
 import re
@@ -56,18 +54,40 @@ async def gemini_predict(history_docs, api_key, model=None):
     model = model or GEMINI_MODEL
     prompt = f"{GEMINI_SYSTEM_PROMPT}\nHistorical results, newest to oldest:\n{_history_text(history_docs)}\nPredict the next result."
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    # Ask Gemini for schema-constrained JSON. This avoids fragile parsing of
+    # prose/markdown and fixes the previous JSONDecodeError seen in Test Gemini API.
     payload = {
         "system_instruction": {"parts": [{"text": GEMINI_SYSTEM_PROMPT}]},
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 180, "responseMimeType": "application/json"},
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 180,
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "prediction": {"type": "STRING", "enum": ["BIG", "SMALL"]},
+                    "confidence": {"type": "NUMBER"},
+                    "reason": {"type": "STRING"},
+                },
+                "required": ["prediction", "confidence", "reason"],
+            },
+        },
     }
     data = await _post_json(url, {"x-goog-api-key": api_key, "Content-Type": "application/json"}, payload)
     text = ""
     for cand in data.get("candidates", []):
         for part in cand.get("content", {}).get("parts", []):
-            if part.get("text"):
+            if isinstance(part, dict) and part.get("text"):
                 text += part["text"]
-    return _parse_json(text)
+    if not text.strip():
+        raise RuntimeError("Gemini returned no text content")
+    try:
+        return _parse_json(text)
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        # Give a useful diagnostic without exposing the API key.
+        preview = text.strip().replace("\n", " ")[:300]
+        raise RuntimeError(f"Gemini returned invalid JSON: {preview}") from e
 
 
 async def openai_predict(history_docs, api_key, model=None):
