@@ -7,13 +7,11 @@ import time
 import re
 import string
 import json
-import base64
 import hashlib
 import uuid
 from contextlib import suppress
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from cryptography.fernet import Fernet, InvalidToken
 
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command
@@ -29,7 +27,6 @@ from aiogram.types import (
 
 import database as db 
 import ai_engines
-import llm_ai
 from ai_engines import AI_MODES, AI_MODE_EMOJIS
 
 # ==========================================================
@@ -37,11 +34,6 @@ from ai_engines import AI_MODES, AI_MODE_EMOJIS
 # ==========================================================
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-# Per-user LLM API keys are encrypted before MongoDB storage. The key is derived
-# from the bot secret unless API_KEY_ENCRYPTION_SECRET is explicitly provided.
-_crypto_seed = os.getenv("API_KEY_ENCRYPTION_SECRET", "").strip() or BOT_TOKEN
-_CRYPTO_KEY = base64.urlsafe_b64encode(hashlib.sha256(_crypto_seed.encode("utf-8")).digest())
-_crypto = Fernet(_CRYPTO_KEY)
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is required")
 try:
@@ -180,7 +172,6 @@ TEXT_BACK = "Back"
 TEXT_VIRTUAL_MODE = "Virtual Mode"
 TEXT_REAL_MODE = "Real Mode"
 TEXT_UPLOAD_CHANNEL = "Upload Channel"
-TEXT_AI_FUNCTIONS = "AI API Functions"
 
 E_INFO = KeyboardButton(text=TEXT_INFO, icon_custom_emoji_id="5868656545634689320", style="primary")
 E_BALANCE = KeyboardButton(text=TEXT_BALANCE, icon_custom_emoji_id="5868108575387671725", style="primary")
@@ -199,7 +190,6 @@ E_BACK = KeyboardButton(text=TEXT_BACK, icon_custom_emoji_id="584811941304143136
 E_VIRTUAL = KeyboardButton(text=TEXT_VIRTUAL_MODE, icon_custom_emoji_id="5807868868886009920", style="primary")
 E_REAL = KeyboardButton(text=TEXT_REAL_MODE, icon_custom_emoji_id="5868656545634689320", style="primary")
 E_UPLOAD = KeyboardButton(text=TEXT_UPLOAD_CHANNEL, icon_custom_emoji_id="5890997763331591703", style="primary")
-E_AI_FUNCTIONS = KeyboardButton(text=TEXT_AI_FUNCTIONS, icon_custom_emoji_id="5877260593903177342", style="primary")
 
 P_1 = '<tg-emoji emoji-id="5890997763331591703">⚙️</tg-emoji>'
 P_2 = '<tg-emoji emoji-id="5875180111744995604">⚙️</tg-emoji>'
@@ -299,8 +289,6 @@ class LoginForm(StatesGroup):
     enter_profit_target = State()
     enter_custom_pattern = State()
     enter_virtual_balance = State() 
-    enter_gemini_key = State()
-    enter_openai_key = State()
 
 # ==========================================================
 # ⌨️ Keyboards
@@ -324,7 +312,6 @@ def get_logged_in_keyboard():
             [E_INFO, E_BALANCE, E_STATUS],
             [E_START, E_STOP],
             [E_GAMES, E_AI],
-            [E_AI_FUNCTIONS],
             [E_BETSIZE, E_PROFIT],
             [E_HIT, E_PREDICT],
             [E_VIRTUAL, E_REAL],
@@ -643,24 +630,6 @@ async def process_password(message: types.Message, state: FSMContext):
         await state.clear()
 
 # ==========================================================
-# 🔐 LLM API Key Helpers
-# ==========================================================
-def _encrypt_api_key(value: str) -> str:
-    return _crypto.encrypt(value.strip().encode("utf-8")).decode("utf-8")
-
-def _decrypt_api_key(value: str):
-    if not value:
-        return None
-    try:
-        return _crypto.decrypt(value.encode("utf-8")).decode("utf-8")
-    except (InvalidToken, ValueError):
-        return None
-
-async def get_user_api_key(user_id: int, provider: str):
-    encrypted = await db.get_user_llm_key(user_id, provider)
-    return _decrypt_api_key(encrypted)
-
-# ==========================================================
 # 📊 API & Database Deep Scanning Logic
 # ==========================================================
 async def get_latest_game_result(target_issue, user_tg_id):
@@ -740,28 +709,16 @@ async def get_ai_prediction(user_tg_id):
                 size_text = "BIG" if num >= 5 else "SMALL"
                 history_list.append(size_text)
         
-        user_ai_name = session_data.get("ai_mode", "PSP_AI_PREDICT")
-
-        # Gemini AI and ChatGPT AI are fully independent modes.
-        # Do not run or consult the local ML/PSP engine when either LLM mode is selected.
-        if user_ai_name in ("Gemini AI", "ChatGPT AI"):
-            provider = "gemini" if user_ai_name == "Gemini AI" else "openai"
-            api_key = await get_user_api_key(user_tg_id, provider)
-            if not api_key:
-                return "wait", 0, next_issue, user_ai_name
-            llm_result = (
-                await llm_ai.gemini_predict(db_records, api_key)
-                if provider == "gemini"
-                else await llm_ai.openai_predict(db_records, api_key)
-            )
-            return llm_result["prediction"].lower(), llm_result["confidence"], next_issue, user_ai_name
-
         from ai_engines import psp_ai_predict
+        
         result = psp_ai_predict(history_list)
+        
         predicted_size = result["prediction"]
         confidence = result["confidence"]
         reason = result["reason"]
         display = result["display"]
+        
+        user_ai_name = session_data.get("ai_mode", "PSP_AI_PREDICT")
         
         if user_ai_name == "Set Pattern":
             pat = session_data.get("custom_pattern", ["BIG"])
@@ -1290,87 +1247,6 @@ async def process_profit(msg: types.Message, state: FSMContext):
         active_sessions[msg.from_user.id]["profit_target"] = int(msg.text)
         await state.set_state(LoginForm.main_menu)
         await msg.answer(f"✅ Profit: {msg.text}", reply_markup=get_logged_in_keyboard())
-
-@dp.message(F.text == TEXT_AI_FUNCTIONS)
-async def cmd_ai_api_functions(msg: types.Message):
-    if msg.from_user.id not in active_sessions:
-        return
-    g = bool(await get_user_api_key(msg.from_user.id, "gemini"))
-    o = bool(await get_user_api_key(msg.from_user.id, "openai"))
-    await msg.answer(
-        "⚙️ <b>AI API Functions</b>\n\n"
-        f"Gemini API: {'✅ Configured' if g else '❌ Not configured'}\n"
-        f"ChatGPT API: {'✅ Configured' if o else '❌ Not configured'}\n\n"
-        "API key ကို ဒီ bot က encrypted အဖြစ်ပဲ သိမ်းထားပါတယ်။",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="🔑 Set Gemini API Key", style="primary")],
-            [KeyboardButton(text="🔑 Set ChatGPT API Key", style="primary")],
-            [KeyboardButton(text="🧪 Test Gemini API", style="success"), KeyboardButton(text="🧪 Test ChatGPT API", style="success")],
-            [KeyboardButton(text="BACK", style="danger")]
-        ], resize_keyboard=True)
-    )
-
-@dp.message(F.text == "🔑 Set Gemini API Key")
-async def set_gemini_key_start(msg: types.Message, state: FSMContext):
-    await state.set_state(LoginForm.enter_gemini_key)
-    await msg.answer("Gemini API key ကို ပို့ပါ။ Key ကို message history ထဲ မသိမ်းဘဲ encrypted အဖြစ် database ထဲ သိမ်းပါမယ်။", reply_markup=get_cancel_keyboard())
-
-@dp.message(LoginForm.enter_gemini_key)
-async def save_gemini_key(msg: types.Message, state: FSMContext):
-    if (msg.text or '').lower() == 'cancel':
-        await state.set_state(LoginForm.main_menu)
-        await msg.answer("❌ Cancelled", reply_markup=get_logged_in_keyboard())
-        return
-    key = (msg.text or '').strip()
-    if len(key) < 20:
-        await msg.answer("❌ API key ပုံစံမမှန်ပါ။")
-        return
-    await db.save_user_llm_key(msg.from_user.id, "gemini", _encrypt_api_key(key))
-    await state.set_state(LoginForm.main_menu)
-    await msg.answer("✅ Gemini API key saved (encrypted).", reply_markup=get_logged_in_keyboard())
-
-@dp.message(F.text == "🔑 Set ChatGPT API Key")
-async def set_openai_key_start(msg: types.Message, state: FSMContext):
-    await state.set_state(LoginForm.enter_openai_key)
-    await msg.answer("ChatGPT/OpenAI API key ကို ပို့ပါ။ Key ကို encrypted အဖြစ် database ထဲ သိမ်းပါမယ်။", reply_markup=get_cancel_keyboard())
-
-@dp.message(LoginForm.enter_openai_key)
-async def save_openai_key(msg: types.Message, state: FSMContext):
-    if (msg.text or '').lower() == 'cancel':
-        await state.set_state(LoginForm.main_menu)
-        await msg.answer("❌ Cancelled", reply_markup=get_logged_in_keyboard())
-        return
-    key = (msg.text or '').strip()
-    if len(key) < 20:
-        await msg.answer("❌ API key ပုံစံမမှန်ပါ။")
-        return
-    await db.save_user_llm_key(msg.from_user.id, "openai", _encrypt_api_key(key))
-    await state.set_state(LoginForm.main_menu)
-    await msg.answer("✅ ChatGPT API key saved (encrypted).", reply_markup=get_logged_in_keyboard())
-
-@dp.message(F.text == "🧪 Test Gemini API")
-async def test_gemini_api(msg: types.Message):
-    key = await get_user_api_key(msg.from_user.id, "gemini")
-    if not key:
-        await msg.answer("❌ Gemini API key မထည့်ရသေးပါ။")
-        return
-    try:
-        result = await llm_ai.gemini_predict(["BIG", "SMALL", "BIG", "SMALL", "BIG", "SMALL"], key)
-        await msg.answer(f"✅ Gemini API OK\nModel: {llm_ai.GEMINI_MODEL}\nPrediction: {result['prediction']}\nConfidence: {result['confidence']:.0f}%")
-    except Exception as e:
-        await msg.answer(f"❌ Gemini API Error: {str(e)[:500]}")
-
-@dp.message(F.text == "🧪 Test ChatGPT API")
-async def test_openai_api(msg: types.Message):
-    key = await get_user_api_key(msg.from_user.id, "openai")
-    if not key:
-        await msg.answer("❌ ChatGPT API key မထည့်ရသေးပါ။")
-        return
-    try:
-        result = await llm_ai.openai_predict(["BIG", "SMALL", "BIG", "SMALL", "BIG", "SMALL"], key)
-        await msg.answer(f"✅ ChatGPT API OK\nModel: {llm_ai.OPENAI_MODEL}\nPrediction: {result['prediction']}\nConfidence: {result['confidence']:.0f}%")
-    except Exception as e:
-        await msg.answer(f"❌ ChatGPT API Error: {str(e)[:500]}")
 
 @dp.message(F.text == TEXT_AI)
 async def cmd_ai_mode(msg: types.Message):
