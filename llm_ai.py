@@ -1,6 +1,6 @@
-"""LLM prediction adapters for Gemini and OpenAI.
-API keys are passed in at runtime; this module never logs them.
-"""
+#"""LLM prediction adapters for Gemini and OpenAI.
+#API keys are passed in at runtime; this module never logs them.
+#"""
 import os
 import json
 import re
