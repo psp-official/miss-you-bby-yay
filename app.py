@@ -1293,9 +1293,8 @@ async def process_profit(msg: types.Message, state: FSMContext):
 
 @dp.message(F.text == TEXT_AI_FUNCTIONS)
 async def cmd_ai_api_functions(msg: types.Message):
-    # API-key management is user-level and must remain accessible even if the
-    # external lottery session was lost/restarted. AuthMiddleware still
-    # protects this handler from unauthorized users.
+    if msg.from_user.id not in active_sessions:
+        return
     g = bool(await get_user_api_key(msg.from_user.id, "gemini"))
     o = bool(await get_user_api_key(msg.from_user.id, "openai"))
     await msg.answer(
@@ -1319,7 +1318,7 @@ async def set_gemini_key_start(msg: types.Message, state: FSMContext):
 @dp.message(LoginForm.enter_gemini_key)
 async def save_gemini_key(msg: types.Message, state: FSMContext):
     if (msg.text or '').lower() == 'cancel':
-        await state.clear()
+        await state.set_state(LoginForm.main_menu)
         await msg.answer("❌ Cancelled", reply_markup=get_logged_in_keyboard())
         return
     key = (msg.text or '').strip()
@@ -1327,13 +1326,8 @@ async def save_gemini_key(msg: types.Message, state: FSMContext):
         await msg.answer("❌ API key ပုံစံမမှန်ပါ။")
         return
     await db.save_user_llm_key(msg.from_user.id, "gemini", _encrypt_api_key(key))
-    await state.clear()
-    await msg.answer("✅ Gemini API key saved (encrypted).\n\nAI API Functions ထဲကနေ Test လုပ်နိုင်ပါတယ်။", reply_markup=ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🔑 Set Gemini API Key", style="primary")],
-        [KeyboardButton(text="🔑 Set ChatGPT API Key", style="primary")],
-        [KeyboardButton(text="🧪 Test Gemini API", style="success"), KeyboardButton(text="🧪 Test ChatGPT API", style="success")],
-        [KeyboardButton(text="BACK", style="danger")]
-    ], resize_keyboard=True))
+    await state.set_state(LoginForm.main_menu)
+    await msg.answer("✅ Gemini API key saved (encrypted).", reply_markup=get_logged_in_keyboard())
 
 @dp.message(F.text == "🔑 Set ChatGPT API Key")
 async def set_openai_key_start(msg: types.Message, state: FSMContext):
@@ -1343,7 +1337,7 @@ async def set_openai_key_start(msg: types.Message, state: FSMContext):
 @dp.message(LoginForm.enter_openai_key)
 async def save_openai_key(msg: types.Message, state: FSMContext):
     if (msg.text or '').lower() == 'cancel':
-        await state.clear()
+        await state.set_state(LoginForm.main_menu)
         await msg.answer("❌ Cancelled", reply_markup=get_logged_in_keyboard())
         return
     key = (msg.text or '').strip()
@@ -1351,13 +1345,8 @@ async def save_openai_key(msg: types.Message, state: FSMContext):
         await msg.answer("❌ API key ပုံစံမမှန်ပါ။")
         return
     await db.save_user_llm_key(msg.from_user.id, "openai", _encrypt_api_key(key))
-    await state.clear()
-    await msg.answer("✅ ChatGPT API key saved (encrypted).\n\nAI API Functions ထဲကနေ Test လုပ်နိုင်ပါတယ်။", reply_markup=ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🔑 Set Gemini API Key", style="primary")],
-        [KeyboardButton(text="🔑 Set ChatGPT API Key", style="primary")],
-        [KeyboardButton(text="🧪 Test Gemini API", style="success"), KeyboardButton(text="🧪 Test ChatGPT API", style="success")],
-        [KeyboardButton(text="BACK", style="danger")]
-    ], resize_keyboard=True))
+    await state.set_state(LoginForm.main_menu)
+    await msg.answer("✅ ChatGPT API key saved (encrypted).", reply_markup=get_logged_in_keyboard())
 
 @dp.message(F.text == "🧪 Test Gemini API")
 async def test_gemini_api(msg: types.Message):
