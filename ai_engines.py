@@ -65,9 +65,7 @@ AI_MODE_EMOJIS = {
     "Circle Rnd":        "5226711870492126219",
     "Custom Pattern":    "6300853298249336390",
     "AI Auto Swap":      "5868665489092263539",
-    "🏆 Best AI Selector": "5884289942371401145",
-    "Gemini AI": "5877652234091891383",
-    "ChatGPT AI": "5877652234091891383"
+    "🏆 Best AI Selector": "5884289942371401145"
 }
 
 # ==========================================================
@@ -1267,10 +1265,16 @@ def best_ai_selector_predict(history_docs):
         f"over {evaluated} signals"
     )
 
+
+def real_ml_20_predict(history_docs):
+    from real_ml20 import predict
+    return predict(history_docs)
+
 # ==========================================
 # 📊 AI Modes Dictionary Update
 # ==========================================
 AI_MODE_NAMES = {
+    "real_ml_20":      "🤖 Real ML 20 Models",
     "pattern":          "Pattern AI",
     "last4_pattern":    "Last 4 Pattern",
     "martingale":       "Martingale AI",
@@ -1294,6 +1298,7 @@ AI_MODE_NAMES = {
 }
 
 AI_MODES = {
+    "real_ml_20":      {"func": real_ml_20_predict, "name": AI_MODE_NAMES["real_ml_20"], "desc": "20 real scikit-learn models with chronological validation"},
     "last4_pattern":    {"func": last4_pattern_predict, "name": AI_MODE_NAMES["last4_pattern"], "desc": "Last 4 sequence pattern"},
     "pattern":          {"func": pattern_predict,           "name": AI_MODE_NAMES["pattern"],         "desc": "Pattern v2 (26 patterns, recency)"},
     "martingale":       {"func": martingale_predict,        "name": AI_MODE_NAMES["martingale"],      "desc": "Multi-Win Contrarian"},
@@ -1322,6 +1327,7 @@ AI_MODES = {
 }
 
 PRO_AI_MODE_NAMES = {
+    "real_ml_20":      "🤖 Real ML 20 Models",
     "pro_lstm": "📊 Pro Sequence Heuristic",
     "pro_gru": "📊 Pro State Heuristic",
     "pro_xgb": "🌲 Pro Tree Heuristic",
@@ -1340,6 +1346,7 @@ AI_MODE_NAMES.update(PRO_AI_MODE_NAMES)
 AI_MODE_NAMES["best_ai_selector"] = "🏆 Best AI Selector"
 
 PRO_AI_MODES = {
+    "real_ml_20":      {"func": real_ml_20_predict, "name": AI_MODE_NAMES["real_ml_20"], "desc": "20 real scikit-learn models with chronological validation"},
     "pro_lstm": {"func": pro_lstm_predict, "name": PRO_AI_MODE_NAMES["pro_lstm"], "desc": "Sequence heuristic (not a trained LSTM)"},
     "pro_gru": {"func": pro_gru_predict, "name": PRO_AI_MODE_NAMES["pro_gru"], "desc": "State heuristic (not a trained GRU)"},
     "pro_xgb": {"func": pro_xgboost_predict, "name": PRO_AI_MODE_NAMES["pro_xgb"], "desc": "Tree-style heuristic (not XGBoost)"},
@@ -1356,8 +1363,6 @@ PRO_AI_MODES = {
 }
 AI_MODES.update(PRO_AI_MODES)
 AI_MODES["best_ai_selector"] = {"func": best_ai_selector_predict, "name": AI_MODE_NAMES["best_ai_selector"], "desc": "Leakage-safe adaptive walk-forward selector"}
-AI_MODES["gemini_ai"] = {"func": pattern_predict, "name": "Gemini AI", "desc": "Google Gemini API statistical analysis"}
-AI_MODES["chatgpt_ai"] = {"func": pattern_predict, "name": "ChatGPT AI", "desc": "OpenAI API statistical analysis"}
 
 def get_prediction(history_docs, mode, user_pattern=None, model_accuracies=None):
     if mode == "custom_pattern":
