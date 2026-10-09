@@ -46,10 +46,26 @@ class PatternSignal:
 class BacktestStats:
     samples: int = 0
     correct: int = 0
+    evaluated: int = 0
+    skipped: int = 0
+    recent_outcomes: List[bool] = None
+
+    def __post_init__(self):
+        if self.recent_outcomes is None:
+            self.recent_outcomes = []
 
     @property
     def accuracy(self) -> float:
         return self.correct / self.samples if self.samples else 0.5
+
+    @property
+    def consecutive_recent_losses(self) -> int:
+        count = 0
+        for won in reversed(self.recent_outcomes):
+            if won:
+                break
+            count += 1
+        return count
 
 
 # ---------- input handling ----------
@@ -250,14 +266,22 @@ def _signal_prediction(seq: Sequence[str]) -> Tuple[str, float, List[PatternSign
 
 
 def walk_forward_backtest(seq: Sequence[str], min_train: int = 30, max_samples: int = 500) -> BacktestStats:
+    """Evaluate only predictions made from earlier data; preserve chronological order."""
     stats = BacktestStats()
     start = max(min_train, 8)
     begin = max(start, len(seq) - max_samples)
+    outcomes: List[bool] = []
     for i in range(begin, len(seq)):
         pred, conf, _ = _signal_prediction(seq[:i])
-        if pred in VALID and conf >= 0.54:
-            stats.samples += 1
-            stats.correct += int(pred == seq[i])
+        stats.evaluated += 1
+        if pred not in VALID or conf < 0.54:
+            stats.skipped += 1
+            continue
+        won = pred == seq[i]
+        stats.samples += 1
+        stats.correct += int(won)
+        outcomes.append(won)
+    stats.recent_outcomes = outcomes[-20:]
     return stats
 
 
@@ -280,15 +304,30 @@ def pattern_ai_predict(history: Iterable[Any], *, newest_first: bool = True) -> 
     bt = walk_forward_backtest(seq)
     regime = detect_regime(seq)
 
-    # Calibration: historical accuracy adjusts, but cannot manufacture confidence.
+    # Historical backtest may reduce confidence, but must never manufacture it.
     calibrated = raw_conf
     if bt.samples >= 20:
-        calibrated *= 0.82 + 0.36 * bt.accuracy
+        calibrated *= min(1.0, 0.80 + 0.40 * bt.accuracy)
     elif bt.samples >= 8:
-        calibrated *= 0.90 + 0.20 * bt.accuracy
+        calibrated *= min(1.0, 0.88 + 0.24 * bt.accuracy)
+    else:
+        # Too few evaluated predictions to trust this engine's measured performance.
+        calibrated *= 0.90
 
-    # Conservative abstention for weak agreement / weak evidence.
-    if prediction not in VALID or calibrated < 0.54:
+    # Safety gates: do not keep emitting picks during a clear recent losing streak.
+    # These are abstention rules, not claims that the next outcome is predictable.
+    recent_losses = bt.consecutive_recent_losses
+    backtest_unreliable = bt.samples >= 30 and bt.accuracy < 0.50
+    recent_cold_streak = recent_losses >= 4
+    insufficient_validation = bt.samples < 8
+
+    if (
+        prediction not in VALID
+        or calibrated < 0.54
+        or backtest_unreliable
+        or recent_cold_streak
+        or insufficient_validation
+    ):
         prediction = WAIT
 
     ranked = sorted(signals, key=lambda x: (x.strength, x.support), reverse=True)
@@ -297,6 +336,12 @@ def pattern_ai_predict(history: Iterable[Any], *, newest_first: bool = True) -> 
         reasons = ["No reliable pattern evidence"]
 
     confidence_pct = round(calibrated * 100, 2) if prediction in VALID else 0
+    if recent_cold_streak:
+        reasons.insert(0, f"WAIT safety gate: {recent_losses} consecutive recent backtest losses")
+    elif backtest_unreliable:
+        reasons.insert(0, f"WAIT safety gate: walk-forward accuracy {bt.accuracy:.1%} below 50%")
+    elif insufficient_validation:
+        reasons.insert(0, f"WAIT safety gate: only {bt.samples} validated predictions")
     display = f"{prediction} | confidence={confidence_pct:.2f}% | regime={regime}"
     return {
         "prediction": prediction,
@@ -308,7 +353,13 @@ def pattern_ai_predict(history: Iterable[Any], *, newest_first: bool = True) -> 
             {"name": s.name, "prediction": s.prediction, "strength": round(s.strength, 4), "support": s.support, "reason": s.reason}
             for s in ranked
         ],
-        "backtest": {"samples": bt.samples, "accuracy": round(bt.accuracy * 100, 2)},
+        "backtest": {
+            "samples": bt.samples,
+            "evaluated": bt.evaluated,
+            "skipped": bt.skipped,
+            "accuracy": round(bt.accuracy * 100, 2),
+            "recent_consecutive_losses": bt.consecutive_recent_losses,
+        },
     }
 
 
