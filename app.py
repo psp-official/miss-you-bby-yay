@@ -683,13 +683,30 @@ async def get_ai_prediction(user_tg_id):
     try:
         async with _DeprecatedSessionGuard() as session:
             async with session.post(url, headers=headers, json=signed_payload) as resp:
-                api_result = await resp.json()
-                records = api_result.get('data', {}).get('list', [])
-                
+                resp.raise_for_status()
+                api_result = await resp.json(content_type=None)
+                if not isinstance(api_result, dict):
+                    raise ValueError("WINGO API returned a non-object response")
+                data = api_result.get('data') or {}
+                records = data.get('list') or []
+
         if not records:
+            session_data["_api_last_error"] = "API returned no game records"
             return None, 0, None, None
-            
-        last_completed_issue = records[0]['issueNumber']
+
+        # Track the latest COMPLETED issue so the bot can detect a stale provider feed.
+        last_completed_issue = str(records[0].get('issueNumber', '')).strip()
+        if not last_completed_issue.isdigit():
+            session_data["_api_last_error"] = "API response is missing a valid issueNumber"
+            return None, 0, None, None
+        now_mono = time.monotonic()
+        if session_data.get("_api_last_completed_issue") != last_completed_issue:
+            session_data["_api_last_completed_issue"] = last_completed_issue
+            session_data["_api_issue_changed_at"] = now_mono
+            session_data["_api_stale_warning_sent"] = False
+        changed_at = session_data.get("_api_issue_changed_at", now_mono)
+        session_data["_api_stale_seconds"] = max(0.0, now_mono - changed_at)
+        session_data["_api_last_error"] = None
         next_issue = str(int(last_completed_issue) + 1)
         
         for item in records:
@@ -752,7 +769,8 @@ async def get_ai_prediction(user_tg_id):
         return predicted_size.lower(), confidence, next_issue, user_ai_name
         
     except Exception as e:
-        print(f"Prediction Error: {e}")
+        session_data["_api_last_error"] = f"{type(e).__name__}: {e}"
+        print(f"Prediction/API Error for user {user_tg_id}: {type(e).__name__}: {e}")
         return None, 0, None, None
 
 async def place_auto_bet(user_tg_id, current_issue, bet_type, total_amount=10, silent=False):
@@ -968,7 +986,33 @@ async def auto_bet_loop(user_tg_id, message: types.Message):
     while active_sessions.get(user_tg_id, {}).get("is_auto_betting", False):
         try:
             pred, _, issue, ai_name = await get_ai_prediction(user_tg_id)
-            
+
+            # Never invent an issue number or place a bet against stale results.
+            stale_seconds = float(session.get("_api_stale_seconds", 0.0) or 0.0)
+            api_error = session.get("_api_last_error")
+            if stale_seconds >= 90 and not session.get("_api_stale_warning_sent", False):
+                session["_api_stale_warning_sent"] = True
+                await message.answer(
+                    "⚠️ <b>WINGO API ရလဒ် မ更新 ဖြစ်နေပါသည်။</b>\n"
+                    f"နောက်ဆုံး completed issue: <code>{session.get('_api_last_completed_issue', 'N/A')}</code>\n"
+                    f"မပြောင်းလဲသေးချိန်: {int(stale_seconds)} စက္ကန့်\n"
+                    "Auto-Bet ကို လုံခြုံရေးအတွက် ရပ်ထားပါသည်။ API ရလဒ်အသစ်ရမှ ပြန်စပါ။"
+                )
+                active_sessions[user_tg_id]["is_auto_betting"] = False
+                break
+
+            if not issue and api_error:
+                now_mono = time.monotonic()
+                last_notice = float(session.get("_api_error_notice_at", 0.0) or 0.0)
+                if now_mono - last_notice >= 60:
+                    session["_api_error_notice_at"] = now_mono
+                    await message.answer(
+                        "⚠️ WINGO API ကို ဖတ်မရသေးပါ။ လောင်းကြေးမတင်ပါ။\n"
+                        f"အကြောင်းရင်း: <code>{html.escape(str(api_error)[:240])}</code>"
+                    )
+                await asyncio.sleep(5)
+                continue
+
             if issue and issue != last_issue:
                 if gn == "WINGO_1M":
                     await asyncio.sleep(30)
